@@ -5,30 +5,100 @@ import(
 	"strings"
 	"bufio"
 	"os"
+	"net/http"
+	"io"
+	"encoding/json"
 )
 
 type cliCommand struct {
     name        string
     description string
-    callback    func() error
+    callback    func(config *Config) error
 }
 
+type LocResponse struct {
+	Count 		int 	`json:"count"`
+	Next		string	`json:"next"`
+	Previous 	string	`json:"previous"`
+	Results 	[]Location	`json:"results"`
+}
+type Location struct {
+	Name	string	`json:"name"`
+	URL 	string 	`json:"url"`
+}
+type Config struct {
+	Next		string	`json:"next"`
+	Previous 	string	`json:"previous"`
+}
 var registry map[string]cliCommand
+
 
 func init() {
     registry = map[string]cliCommand{
         "exit": {name: "exit", description: "Exit the Pokedex", callback: commandExit},
         "help": {name: "help", description: "Displays a help message", callback: commandHelp},
+        "map": {name: "map", description: "Show next 20 locations", callback:commandMap},
+        "mapb": {name: "mapb", description: "Show previous 20 locations", callback:commandMapb},
     }
 }
 
-func commandExit() error {
+func commandMap(config *Config) error {
+	if config.Next == "" {
+		config.Next = "https://pokeapi.co/api/v2/location-area" 
+	}
+	url := config.Next
+	res, err := http.Get(url)
+	if err != nil {
+		return err
+	}  
+	defer res.Body.Close()
+	var resources LocResponse
+	data, _ := io.ReadAll(res.Body)
+	err = json.Unmarshal(data, &resources)
+	if err != nil {
+		return err
+	}
+
+	for _, result := range resources.Results{
+		fmt.Println(result.Name)
+	}
+	config.Next = resources.Next
+	config.Previous = resources.Previous
+	return nil
+}
+func commandMapb(config *Config) error {
+	
+	if config.Previous == "" {
+		fmt.Println("you're on the first page")
+		return nil
+	}
+	url := config.Previous
+	res, err := http.Get(url)
+	if err != nil {
+		return err
+	}  
+	defer res.Body.Close()
+	var resources LocResponse
+	data, _ := io.ReadAll(res.Body)
+	err = json.Unmarshal(data, &resources)
+	if err != nil {
+		return err
+	}
+
+	for _, result := range resources.Results{
+		fmt.Println(result.Name)
+	}
+	config.Previous = resources.Previous
+	config.Next = resources.Next
+	return nil
+}
+func commandExit(config *Config) error {
     fmt.Println("Closing the Pokedex... Goodbye!")
     os.Exit(0)
     return nil
 }
 
-func commandHelp() error {
+func commandHelp(config *Config) error {
     fmt.Println("Welcome to the Pokedex!")
     fmt.Println("Usage:")
     fmt.Println()
@@ -47,7 +117,7 @@ func cleanInput(text string) []string {
 
 
 func main() {
-
+	locURLs := Config{}
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
 		fmt.Print("Pokedex > ")
@@ -65,6 +135,10 @@ func main() {
 		if !commandExists {
 			fmt.Print("Unknown command\n")
 		}
-		command.callback()
-		} 
+		err := command.callback(&locURLs)
+		if err != nil {
+			fmt.Println(err)
+			continue
+		}
+	} 
 }
